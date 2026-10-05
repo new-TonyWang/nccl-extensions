@@ -3377,6 +3377,44 @@ ncclResult_t ncclEpUpdateHandle(
     return ncclSuccess;
 }
 
+ncclResult_t ncclEpExportExpertMajorRouting(
+    ncclEpHandle_t handle,
+    const ncclEpTensor_t* token_to_slot,
+    const ncclEpTensor_t* flat_to_expert,
+    cudaStream_t stream) {
+    if (handle == nullptr || !handle->num_tokens_set) return ncclInvalidUsage;
+    auto* group = handle->group;
+    if (group->config.algorithm != NCCL_EP_ALGO_HIGH_THROUGHPUT ||
+        handle->layout != NCCL_EP_LAYOUT_EXPERT_MAJOR ||
+        group->ht_em_mode != ncclEpGroup::HtEmMode::kLocalPermute ||
+        group->lsa_team_size != group->nRanks || group->eager_mode) {
+        return ncclInvalidUsage;
+    }
+    if (handle->ht.token_to_recv_slot == nullptr || handle->ht.flat2em_slot_map == nullptr)
+        return ncclInvalidUsage;
+    if (token_to_slot == nullptr || flat_to_expert == nullptr) return ncclInvalidArgument;
+    token_to_slot = tensor_required(token_to_slot);
+    flat_to_expert = tensor_required(flat_to_expert);
+    const size_t source_slots =
+        static_cast<size_t>(group->nRanks) * group->config.max_dispatch_tokens_per_rank;
+    const size_t recv_slots = group->config.max_recv_tokens_per_rank;
+    if (token_to_slot->datatype != ncclInt32 || token_to_slot->ndim != 1 ||
+        token_to_slot->sizes[0] != source_slots || token_to_slot->data == nullptr ||
+        flat_to_expert->datatype != ncclInt32 || flat_to_expert->ndim != 2 ||
+        flat_to_expert->sizes[0] != recv_slots ||
+        flat_to_expert->sizes[1] != static_cast<size_t>(handle->num_topk) ||
+        flat_to_expert->data == nullptr ||
+        token_to_slot->win_hdl != ncclWindow_t{} || flat_to_expert->win_hdl != ncclWindow_t{}) {
+        return ncclInvalidArgument;
+    }
+    CUDA_CHECK(cudaMemcpyAsync(token_to_slot->data, handle->ht.token_to_recv_slot,
+                               source_slots * sizeof(int32_t), cudaMemcpyDeviceToDevice, stream));
+    CUDA_CHECK(cudaMemcpyAsync(flat_to_expert->data, handle->ht.flat2em_slot_map,
+                               recv_slots * handle->num_topk * sizeof(int32_t),
+                               cudaMemcpyDeviceToDevice, stream));
+    return ncclSuccess;
+}
+
 ncclResult_t ncclEpCreateHandle(
     ncclEpHandle_t* out_handle,
     ncclEpGroup_t ep_group,

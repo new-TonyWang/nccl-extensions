@@ -549,7 +549,8 @@ ncclResult_t call_metadata_preprocessing(
             sp.out_is_int64 = out_is_int64;
             sp.max_recv_tokens_per_rank = max_recv_tokens_per_rank;
             sp.allow_overflow_drop = allow_overflow_drop;
-            sp.token_to_recv_slot = nullptr;  // not needed: recv slot known at emit
+            // Preserve the prepared map for routing-aware source quantizers.
+            sp.token_to_recv_slot = token_to_recv_slot;
             // EM-permute outputs.
             sp.expert_scan_tmp = expert_scan_tmp;
             sp.flat2em_slot_map = flat2em_slot_map;
