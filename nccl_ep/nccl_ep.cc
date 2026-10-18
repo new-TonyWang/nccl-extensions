@@ -3384,10 +3384,18 @@ ncclResult_t ncclEpExportExpertMajorRouting(
     cudaStream_t stream) {
     if (handle == nullptr || !handle->num_tokens_set) return ncclInvalidUsage;
     auto* group = handle->group;
+    // NOTE: the single-LSA-team restriction came in with the export feature
+    // itself (5e90d00) as a conservative gate for the only-validated
+    // configuration, not as protection against a diagnosed cross-node failure.
+    // Cross-node smoke evidence supports lifting it: scan writes
+    // token_to_recv_slot for all global tokens (buffer sized nRanks*max_tokens)
+    // and the consumer derives the sender view via a world-group all_to_all, so
+    // multi-LSA semantics are defined. Rejection below keeps the other
+    // prerequisites intact.
     if (group->config.algorithm != NCCL_EP_ALGO_HIGH_THROUGHPUT ||
         handle->layout != NCCL_EP_LAYOUT_EXPERT_MAJOR ||
         group->ht_em_mode != ncclEpGroup::HtEmMode::kLocalPermute ||
-        group->lsa_team_size != group->nRanks || group->eager_mode) {
+        group->eager_mode) {
         return ncclInvalidUsage;
     }
     if (handle->ht.token_to_recv_slot == nullptr || handle->ht.flat2em_slot_map == nullptr)
